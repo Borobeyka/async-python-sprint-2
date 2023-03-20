@@ -1,8 +1,12 @@
 from typing import List, Dict, Callable
-from datetime import datetime
+from datetime import datetime, timedelta
+from threading import Timer
 from enum import Enum
+from time import sleep
 
 from uuid import uuid4
+
+from logger import logger
 
 class Status(Enum):
     IN_QUEUE = 1,
@@ -23,8 +27,9 @@ class Task:
             dependencies: List = [],
             status: Status = Status.IN_QUEUE
         ):
-        self.id = id
+        self.id = id if id is not None else uuid4()
         self.func = func
+        self.name = func.__name__
         self.args = args
         self.kwargs = kwargs
         self.start_at = start_at
@@ -32,9 +37,20 @@ class Task:
         self.attempts = attempts
         self.dependencies = dependencies
         self.status = status
+        self.prefix = f"Task \"{self.name}\" [ID: {self.id}]"
 
     def run(self):
-        return self.func(*self.args, **self.kwargs)
+        now = datetime.now()
+        if (difference_time := (self.start_at - now).total_seconds()) > 0:
+            logger.debug(f"{self.prefix} waiting for run at {self.start_at}")
+            #! Ну как запустить через время
+            Timer(difference_time, self.run).start()
+            # sleep(difference_time)
+        else:
+            logger.debug(f"{self.prefix} is running")
+            self.func(*self.args, **self.kwargs)
+            logger.debug(f"{self.prefix} completed")
+            self.status = Status.COMPLETED
 
     def pause(self):
         pass
