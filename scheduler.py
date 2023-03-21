@@ -1,17 +1,16 @@
-from threading import Timer
 from typing import List, Callable, Generator
-from datetime import datetime, timedelta
+from datetime import timedelta
 from functools import wraps
-from time import sleep
-
-# from uuid import uuid4
+import pickle
 
 from logger import logger
 from task import Task, Status
 
 """
     • Нужно ли удалять задачи из планировщика после завершения?
+    • (Если "да") Нужно ли сохранять в бэкап выполненные или с выполненные с ошибкой таски?
 """
+
 
 def coroutine(func: Callable) -> Callable:
     @wraps(func)
@@ -21,13 +20,13 @@ def coroutine(func: Callable) -> Callable:
         return gen
     return wrap
 
+
 class Scheduler:
     def __init__(self, pool_size: int = 10):
         self.pool_size = pool_size
         self.tasks: List[Task] = []
         self.attempts_interval = timedelta(seconds=4)
         self.is_run = True
-
 
     def schedule(self, task: Task) -> None:
         if self.is_task_exists(task):
@@ -48,43 +47,58 @@ class Scheduler:
             task = (yield)
             try:
                 task.run()
-            except Exception:
+            except Exception as ex:
                 task.attempts -= 1
                 if task.attempts > 0:
                     task.status = Status.IN_QUEUE
                     task.start_at += self.attempts_interval
                 else:
                     task.status = Status.ERROR
-                logger.debug(f"{task.prefix} fault with error ({task.attempts} attempts left)")
+                logger.debug(f"""
+                    {task.prefix} fault with error
+                    ({task.attempts} attempts left) (Error: {ex})
+                """)
 
-                
-    def run(self):
+    def run(self) -> None:
         executor = self.start_task()
         while self.is_run and self.tasks_count():
             for task in self.get_tasks():
                 task.status = Status.IN_PROGRESS
                 executor.send(task)
-            
-    def get_tasks(self):
+
+    def get_tasks(self) -> Generator[Task, None, None]:
         self.sort()
-        # task = self.tasks.pop(0)
-        # yield self.tasks[0]
-        for task in [ task for task in self.tasks if task.status == Status.IN_QUEUE ][:self.pool_size]:
+        for task in [task for task in self.tasks if task.status == Status.IN_QUEUE][:self.pool_size]:
             yield task
 
-        
     def sort(self) -> None:
-        self.tasks = sorted(self.tasks, key=lambda x: x.status == Status.IN_QUEUE, reverse=True)
+        self.tasks = sorted(
+            self.tasks,
+            key=lambda x: x.status == Status.IN_QUEUE,
+            reverse=True
+        )
 
     def is_task_exists(self, task: Task) -> bool:
         return task in self.tasks
-    
+
     def tasks_count(self) -> int:
-        return len([task for task in self.tasks if task.status not in [Status.ERROR, Status.COMPLETED]])
+        return len([
+            task for task in self.tasks
+            if task.status not in [Status.ERROR, Status.COMPLETED]
+        ])
 
-    def restart(self):
-        return NotImplemented
-
-    def stop(self):
+    def stop(self) -> None:
         self.is_run = False
+        with open("store.pkl", "wb") as file:
+            pickle.dump(self.tasks, file, pickle.HIGHEST_PROTOCOL)
+        logger.debug("Scheduler stopped, tasks saved")
 
+    def load(self) -> None:
+        try:
+            with open("store.pkl", "rb") as f:
+                self.tasks = pickle.load(f)
+        except IOError:
+            logger.debug("Couldnt open file, check path file")
+        else:
+            logger.debug("Scheduler loaded, tasks restored")
+            self.run()
