@@ -24,7 +24,6 @@ class Task:
             args: List = None,
             kwargs: Dict = None,
             start_at: datetime = datetime.now(),
-            max_working_time: int = -1,
             attempts: int = 0,
             dependencies: List = [],
             status: Status = Status.IN_QUEUE
@@ -35,7 +34,6 @@ class Task:
         self.args = args if args is not None else []
         self.kwargs = kwargs if kwargs is not None else {}
         self.start_at = start_at
-        self.max_working_time = max_working_time
         self.attempts = attempts
         self.dependencies = dependencies
         self.status = status
