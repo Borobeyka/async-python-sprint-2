@@ -3,14 +3,16 @@ from datetime import timedelta
 from functools import wraps
 import pickle
 
+from singleton import Singleton
 from logger import logger
 from task import Task, Status
 
 BACKUP_FILENAME = "backup.pkl"
+ATTEMPTS_INTERVAL = timedelta(seconds=4)
 
 """
     • Нужно ли удалять задачи из планировщика после завершения?
-    • (Если "да") Нужно ли сохранять в бэкап выполненные или с выполненные с ошибкой таски?
+    • (Если "нет") Нужно ли сохранять в бэкап выполненные или выполненные с ошибкой задачи?
 """
 
 
@@ -23,15 +25,15 @@ def coroutine(func: Callable) -> Callable:
     return wrap
 
 
-class Scheduler:
+class Scheduler(metaclass=Singleton):
     def __init__(self, pool_size: int = 10):
         self.pool_size = pool_size
         self.tasks: List[Task] = []
-        self.attempts_interval = timedelta(seconds=4)
-        self.is_run = True
+        self.attempts_interval = ATTEMPTS_INTERVAL
 
     def schedule(self, task: Task) -> None:
         if self.is_task_exists(task):
+            logger.debug(f"{task.prefix} has already added")
             logger.debug(f"{task.prefix} has already added")
             return
 
@@ -59,6 +61,7 @@ class Scheduler:
                 logger.debug(f"{task.prefix} fault with error ({task.attempts} attempts left) (Error: {ex})")
 
     def run(self) -> None:
+        self.is_run = True
         executor = self.start_task()
         while self.is_run and self.tasks_count():
             for task in self.get_tasks():
