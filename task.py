@@ -9,11 +9,11 @@ from logger import logger
 
 
 class Status(Enum):
-    IN_QUEUE = 1,
-    IN_PROGRESS = 2,
-    WAITING = 3,
-    COMPLETED = 4,
-    ERROR = 5,
+    IN_QUEUE = 1
+    IN_PROGRESS = 2
+    WAITING = 3
+    COMPLETED = 4
+    ERROR = 5
 
 
 class Task:
@@ -21,8 +21,8 @@ class Task:
             self,
             ident: uuid4,
             func: Callable,
-            args: List = [],
-            kwargs: Dict = {},
+            args: List = None,
+            kwargs: Dict = None,
             start_at: datetime = datetime.now(),
             max_working_time: int = -1,
             attempts: int = 0,
@@ -32,8 +32,8 @@ class Task:
         self.ident = ident if ident is not None else uuid4()
         self.func = func
         self.name = func.__name__
-        self.args = args
-        self.kwargs = kwargs
+        self.args = args if args is not None else []
+        self.kwargs = kwargs if kwargs is not None else {}
         self.start_at = start_at
         self.max_working_time = max_working_time
         self.attempts = attempts
@@ -45,7 +45,6 @@ class Task:
         now = datetime.now()
         if (difference_time := (self.start_at - now).total_seconds()) > 0:
             logger.debug(f"{self.prefix} waiting for run at {self.start_at}")
-            # Timer(difference_time, self.reset).start()
             Timer(difference_time, self.reset).start()
             self.status = Status.WAITING
         else:
@@ -53,16 +52,10 @@ class Task:
             try:
                 self.func(*self.args, **self.kwargs)
             except Exception as ex:
-                raise Exception(ex)
+                raise Exception(ex) from ex
             else:
                 logger.debug(f"{self.prefix} completed")
                 self.status = Status.COMPLETED
 
     def reset(self):
         self.status = Status.IN_QUEUE
-
-    def pause(self):
-        pass
-
-    def stop(self):
-        pass

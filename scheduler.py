@@ -6,6 +6,8 @@ import pickle
 from logger import logger
 from task import Task, Status
 
+BACKUP_FILENAME = "backup.pkl"
+
 """
     • Нужно ли удалять задачи из планировщика после завершения?
     • (Если "да") Нужно ли сохранять в бэкап выполненные или с выполненные с ошибкой таски?
@@ -54,10 +56,7 @@ class Scheduler:
                     task.start_at += self.attempts_interval
                 else:
                     task.status = Status.ERROR
-                logger.debug(f"""
-                    {task.prefix} fault with error
-                    ({task.attempts} attempts left) (Error: {ex})
-                """)
+                logger.debug(f"{task.prefix} fault with error ({task.attempts} attempts left) (Error: {ex})")
 
     def run(self) -> None:
         executor = self.start_task()
@@ -89,15 +88,15 @@ class Scheduler:
 
     def stop(self) -> None:
         self.is_run = False
-        with open("store.pkl", "wb") as file:
+        with open(BACKUP_FILENAME, "wb") as file:
             pickle.dump(self.tasks, file, pickle.HIGHEST_PROTOCOL)
         logger.debug("Scheduler stopped, tasks saved")
 
     def load(self) -> None:
         try:
-            with open("store.pkl", "rb") as f:
+            with open(BACKUP_FILENAME, "rb") as f:
                 self.tasks = pickle.load(f)
-        except IOError:
+        except FileNotFoundError:
             logger.debug("Couldnt open file, check path file")
         else:
             logger.debug("Scheduler loaded, tasks restored")
