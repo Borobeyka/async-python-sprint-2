@@ -10,6 +10,7 @@ logger_config = {
         "rotation": "5 MB",
         "compression": "zip",
         "level": "DEBUG",
+        "mode": "w",  # ! Убрать mode
     }]
 }
 logger.remove()

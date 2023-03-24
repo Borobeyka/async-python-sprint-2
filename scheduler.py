@@ -10,11 +10,6 @@ from task import Task, Status
 BACKUP_FILENAME = "backup.pkl"
 ATTEMPTS_INTERVAL = timedelta(seconds=4)
 
-"""
-    • Нужно ли удалять задачи из планировщика после завершения?
-    • (Если "нет") Нужно ли сохранять в бэкап выполненные или выполненные с ошибкой задачи?
-"""
-
 
 def coroutine(func: Callable) -> Callable:
     @wraps(func)
@@ -33,7 +28,6 @@ class Scheduler(metaclass=Singleton):
 
     def schedule(self, task: Task) -> None:
         if self.is_task_exists(task):
-            logger.debug(f"{task.prefix} has already added")
             logger.debug(f"{task.prefix} has already added")
             return
 
@@ -103,4 +97,3 @@ class Scheduler(metaclass=Singleton):
             logger.debug("Couldnt open file, check path file")
         else:
             logger.debug("Scheduler loaded, tasks restored")
-            self.run()

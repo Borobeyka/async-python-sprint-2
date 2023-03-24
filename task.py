@@ -1,4 +1,5 @@
-from typing import List, Dict, Callable
+from __future__ import annotations
+from typing import List, Dict, Callable, Optional
 from datetime import datetime
 from threading import Timer
 from enum import Enum
@@ -19,23 +20,23 @@ class Status(Enum):
 class Task:
     def __init__(
             self,
-            ident: uuid4,
+            ident: Optional[uuid4],
             func: Callable,
-            args: List = None,
-            kwargs: Dict = None,
-            start_at: datetime = datetime.now(),
-            attempts: int = 0,
-            dependencies: List = [],
+            args: Optional[List] = None,
+            kwargs: Optional[Dict] = None,
+            start_at: Optional[datetime] = None,
+            attempts: Optional[int] = None,
+            dependencies: Optional[List[Task]] = None,
             status: Status = Status.IN_QUEUE
     ):
-        self.ident = ident if ident is not None else uuid4()
+        self.ident = ident or uuid4()
         self.func = func
         self.name = func.__name__
-        self.args = args if args is not None else []
-        self.kwargs = kwargs if kwargs is not None else {}
-        self.start_at = start_at
-        self.attempts = attempts
-        self.dependencies = dependencies
+        self.args = args or []
+        self.kwargs = kwargs or {}
+        self.start_at = start_at or datetime.now()
+        self.attempts = attempts or 0
+        self.dependencies = dependencies or []
         self.status = status
         self.prefix = f"Task \"{self.name}\" [ID: {self.ident}]"
 

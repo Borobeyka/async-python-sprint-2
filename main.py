@@ -22,3 +22,4 @@ scheduler.stop()
 
 scheduler = Scheduler()
 scheduler.load()
+scheduler.run()
