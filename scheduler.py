@@ -1,14 +1,12 @@
 from typing import List, Callable, Generator
-from datetime import timedelta
 from functools import wraps
 import pickle
 
 from singleton import Singleton
 from logger import logger
-from task import Task, Status
+from task import Task, Status, EarlyExecutionTask
 
-BACKUP_FILENAME = "backup.pkl"
-ATTEMPTS_INTERVAL = timedelta(seconds=4)
+from settings import Settings
 
 
 def coroutine(func: Callable) -> Callable:
@@ -24,48 +22,50 @@ class Scheduler(metaclass=Singleton):
     def __init__(self, pool_size: int = 10):
         self.pool_size = pool_size
         self.tasks: List[Task] = []
-        self.attempts_interval = ATTEMPTS_INTERVAL
+        self.attempts_interval = Settings.ATTEMPTS_INTERVAL
 
     def schedule(self, task: Task) -> None:
         if self.is_task_exists(task):
             logger.debug(f"{task.prefix} has already added")
             return
-
-        for subtask in task.dependencies:
-            if not self.is_task_exists(subtask):
-                self.schedule(subtask)
-                task.start_at = subtask.start_at + timedelta(seconds=.1)
-
         self.tasks.append(task)
         logger.debug(f"{task.prefix} was added with {len(task.dependencies)} dependencies")
 
-    @coroutine
-    def start_task(self) -> None:
-        while True:
-            task = (yield)
-            try:
-                task.run()
-            except Exception as ex:
-                task.attempts -= 1
-                if task.attempts > 0:
-                    task.status = Status.IN_QUEUE
-                    task.start_at += self.attempts_interval
-                else:
-                    task.status = Status.ERROR
-                logger.debug(f"{task.prefix} fault with error ({task.attempts} attempts left) (Error: {ex})")
-
     def run(self) -> None:
         self.is_run = True
-        executor = self.start_task()
         while self.is_run and self.tasks_count():
-            for task in self.get_tasks():
-                task.status = Status.IN_PROGRESS
-                executor.send(task)
+            task = self.get_task()
+            if not task:
+                continue
+            try:
+                task_gen = task.run()
+                next(task_gen)
 
-    def get_tasks(self) -> Generator[Task, None, None]:
+                # Правильно ли здесь пишу - next(task_gen)
+                # Что бы тут не писал, код не выполняется, почему?
+
+            except StopIteration:
+                task.status = Status.COMPLETED
+                continue
+            except EarlyExecutionTask:
+                task.status = Status.WAITING
+                self.schedule(task)
+                continue
+            except Exception as ex:
+                task.status = Status.ERROR
+                logger.debug(f"{task.prefix} fault with error ({ex})")
+                # ! TRIES ADD HERE
+                continue
+            task.status = Status.IN_QUEUE
+            self.schedule(task)
+
+    def get_task(self) -> Task | bool:
         self.sort()
-        for task in [task for task in self.tasks if task.status == Status.IN_QUEUE][:self.pool_size]:
-            yield task
+        if self.tasks[0].status != Status.IN_QUEUE:
+            return False
+        task = self.tasks.pop(0)
+        task.status = Status.IN_PROGRESS
+        return task
 
     def sort(self) -> None:
         self.tasks = sorted(
@@ -85,13 +85,13 @@ class Scheduler(metaclass=Singleton):
 
     def stop(self) -> None:
         self.is_run = False
-        with open(BACKUP_FILENAME, "wb") as file:
+        with open(Settings.BACKUP_FILENAME, "wb") as file:
             pickle.dump(self.tasks, file, pickle.HIGHEST_PROTOCOL)
         logger.debug("Scheduler stopped, tasks saved")
 
     def load(self) -> None:
         try:
-            with open(BACKUP_FILENAME, "rb") as f:
+            with open(Settings.BACKUP_FILENAME, "rb") as f:
                 self.tasks = pickle.load(f)
         except FileNotFoundError:
             logger.debug("Couldnt open file, check path file")
