@@ -1,26 +1,23 @@
-from typing import List, Callable, Generator
-from functools import wraps
+from datetime import datetime
+from typing import List
+
 import pickle
 
 from singleton import Singleton
+from task import Task, Status
 from logger import logger
-from task import Task, Status, EarlyExecutionTask
-
 from settings import Settings
-
-
-def coroutine(func: Callable) -> Callable:
-    @wraps(func)
-    def wrap(*args, **kwargs) -> Generator:
-        gen = func(*args, **kwargs)
-        next(gen)
-        return gen
-    return wrap
+from exceptions import (
+    EarlyExecutionTask,
+    DependenciesNotReady,
+    ExecutionTimeoutOut
+)
 
 
 class Scheduler(metaclass=Singleton):
-    def __init__(self, pool_size: int = 10):
-        self.pool_size = pool_size
+    def __init__(self, max_pool_size: int = 10):
+        self.max_pool_size = max_pool_size
+        self.cur_pool_size = 0
         self.tasks: List[Task] = []
         self.attempts_interval = Settings.ATTEMPTS_INTERVAL
 
@@ -28,41 +25,55 @@ class Scheduler(metaclass=Singleton):
         if self.is_task_exists(task):
             logger.debug(f"{task.prefix} has already added")
             return
+        task.status = Status.IN_QUEUE
         self.tasks.append(task)
         logger.debug(f"{task.prefix} was added with {len(task.dependencies)} dependencies")
 
     def run(self) -> None:
         self.is_run = True
         while self.is_run and self.tasks_count():
-            task = self.get_task()
-            if not task:
+            if self.cur_pool_size > self.max_pool_size:
                 continue
             try:
-                task_gen = task.run()
-                next(task_gen)
-
-                # Правильно ли здесь пишу - next(task_gen)
-                # Что бы тут не писал, код не выполняется, почему?
-
-            except StopIteration:
-                task.status = Status.COMPLETED
-                continue
-            except EarlyExecutionTask:
-                task.status = Status.WAITING
+                task = self.get_task()
+                if not task:
+                    break
+                if task.generator is None:
+                    if not task.is_able_to_run():
+                        raise EarlyExecutionTask
+                    logger.debug(f"{task.prefix} is running")
+                    task.generator = task.run()
+                    self.cur_pool_size += 1
+                next(task.generator)
+                if not task.is_dependencies_completed():
+                    raise DependenciesNotReady
+                if (datetime.now() - task.started_at).total_seconds() > task.timeout:
+                    logger.debug(f"{task.prefix} execution timeout out")
+                    raise ExecutionTimeoutOut
+                self.cur_pool_size -= 1
                 self.schedule(task)
-                continue
-            except Exception as ex:
-                task.status = Status.ERROR
-                logger.debug(f"{task.prefix} fault with error ({ex})")
-                # ! TRIES ADD HERE
-                continue
-            task.status = Status.IN_QUEUE
-            self.schedule(task)
+            except StopIteration:
+                logger.debug(f"{task.prefix} completed (with {len(task.dependencies)} dependencies)")
+                task.status = Status.COMPLETED
+                self.cur_pool_size -= 1
+            except EarlyExecutionTask:
+                logger.debug(f"{task.prefix} waiting to start at - {task.start_at}")
+                self.schedule(task)
+            except DependenciesNotReady:
+                logger.debug(f"{task.prefix} not all dependencies done")
+                self.schedule(task)
+            except (ExecutionTimeoutOut, Exception) as ex:
+                if task.attempts > 0:
+                    task.attempts -= 1
+                    task.start_at = datetime.now() + Settings.ATTEMPTS_INTERVAL
+                    self.schedule(task)
+                logger.debug(f"{task.prefix} fault with error, attempts left {task.attempts} (Error: {ex})")
+        logger.debug("All tasks completed")
 
     def get_task(self) -> Task | bool:
         self.sort()
-        if self.tasks[0].status != Status.IN_QUEUE:
-            return False
+        # if self.tasks[0].status != Status.IN_QUEUE:
+        #     return False
         task = self.tasks.pop(0)
         task.status = Status.IN_PROGRESS
         return task

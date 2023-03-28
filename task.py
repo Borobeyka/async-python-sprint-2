@@ -1,25 +1,28 @@
 from __future__ import annotations
-from threading import Timer
-from typing import List, Dict, Callable, Optional
+from typing import List, Dict, Callable, Optional, Generator
 from datetime import datetime
+from functools import wraps
 from enum import Enum
 
 from uuid import uuid4
 
 from settings import Settings
-from logger import logger
 
 
 class Status(Enum):
     IN_QUEUE = 1
     IN_PROGRESS = 2
-    WAITING = 3
-    COMPLETED = 4
-    ERROR = 5
+    COMPLETED = 3
+    ERROR = 4
 
 
-class EarlyExecutionTask(Exception):
-    pass
+def coroutine(func: Callable) -> Callable:
+    @wraps(func)
+    def wrap(*args, **kwargs) -> Generator:
+        gen = func(*args, **kwargs)
+        next(gen)
+        return gen
+    return wrap
 
 
 class Task:
@@ -33,6 +36,7 @@ class Task:
             attempts: Optional[int] = None,
             dependencies: Optional[List[Task]] = None,
             timeout: Optional[int] = None,
+            generator: Optional[Generator] = None,
             status: Status = Status.IN_QUEUE
     ):
         self.ident = ident or uuid4()
@@ -40,37 +44,28 @@ class Task:
         self.name = func.__name__
         self.args = args or []
         self.kwargs = kwargs or {}
-        self.start_at = start_at or datetime.now()
+        self.start_at = start_at or None
         self.attempts = attempts or 0
         self.dependencies = dependencies or []
         self.timeout = timeout or Settings.TIMEOUT_SECONDS
         self.status = status
         self.prefix = f"Task \"{self.name}\" [ID: {self.ident}]"
+        self.generator = generator
 
+    @coroutine
     def run(self):
         for dependence in self.dependencies:
-            logger.debug(f"{self.prefix} started the dependence - {dependence.prefix}")
             yield from dependence.run()
+        self.started_at = datetime.now()
+        yield self.func(*self.args, **self.kwargs)
 
-        # Вопрос 1
-        # Дочерние таски выполняются, все ок. Когда главная таска отложена - выкидываю кастомную ошибку
-        # что ранний запуск. После когда наступает время выполнения - выполняются зависимости, хотя они
-        # уже были ранее выполнены... Направьте, пожалуйста, как следует реализовывать.
-        # Пересмотрел не один десяток раз материалы курса, но все равно не понимаю
+    def is_able_to_run(self) -> bool:
+        if self.start_at is None or self.start_at <= datetime.now():
+            return True
+        return False
 
-        # Вопрос 2
-        # Как можно реализовать таймаут на исполнение?
-        # (Время до запуска - время после выполнения) и если больше таймаута, то ошибка?
-        # Таким образом таска все равно ведь выполнится...
-
-        if (difference_time := (self.start_at - datetime.now()).total_seconds()) > 0:
-            logger.debug(f"{self.prefix} waiting for run at {self.start_at}")
-            Timer(difference_time, self.reset).start()
-            raise EarlyExecutionTask
-        else:
-            logger.debug(f"{self.prefix} is running")
-            self.func(*self.args, **self.kwargs)
-            logger.debug(f"{self.prefix} completed")
-
-    def reset(self):
-        self.status = Status.IN_QUEUE
+    def is_dependencies_completed(self) -> bool:
+        for dependence in self.dependencies:
+            if dependence.status != Status.COMPLETED:
+                return False
+        return True
