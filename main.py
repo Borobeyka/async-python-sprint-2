@@ -14,6 +14,8 @@ tasks = [
     Task(None, print, (100, 100), attempts=2),
 ]
 
+
+# TODO РАЗОБРАТЬСЯ С POOL_SIZE
 scheduler = Scheduler(0)
 
 [scheduler.schedule(task) for task in tasks]
