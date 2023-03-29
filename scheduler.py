@@ -27,53 +27,52 @@ class Scheduler(metaclass=Singleton):
             return
         task.status = Status.IN_QUEUE
         self.tasks.append(task)
-        logger.debug(f"{task.prefix} was added with {len(task.dependencies)} dependencies")
 
     def run(self) -> None:
         self.is_run = True
         while self.is_run and self.tasks_count():
-            if self.cur_pool_size > self.max_pool_size:
+            if self.cur_pool_size >= self.max_pool_size:
                 continue
             try:
                 task = self.get_task()
                 if not task:
                     break
+                self.cur_pool_size += 1
                 if task.generator is None:
                     if not task.is_able_to_run():
                         raise EarlyExecutionTask
                     logger.debug(f"{task.prefix} is running")
                     task.generator = task.run()
-                    self.cur_pool_size += 1
                 next(task.generator)
                 if not task.is_dependencies_completed():
                     raise DependenciesNotReady
                 if (datetime.now() - task.started_at).total_seconds() > task.timeout:
-                    logger.debug(f"{task.prefix} execution timeout out")
                     raise ExecutionTimeoutOut
-                self.cur_pool_size -= 1
                 self.schedule(task)
             except StopIteration:
                 logger.debug(f"{task.prefix} completed (with {len(task.dependencies)} dependencies)")
                 task.status = Status.COMPLETED
-                self.cur_pool_size -= 1
             except EarlyExecutionTask:
-                logger.debug(f"{task.prefix} waiting to start at - {task.start_at}")
                 self.schedule(task)
             except DependenciesNotReady:
                 logger.debug(f"{task.prefix} not all dependencies done")
                 self.schedule(task)
             except (ExecutionTimeoutOut, Exception) as ex:
+                if type(ex) == ExecutionTimeoutOut:
+                    logger.debug(f"{task.prefix} execution timeout out")
                 if task.attempts > 0:
                     task.attempts -= 1
                     task.start_at = datetime.now() + Settings.ATTEMPTS_INTERVAL
                     self.schedule(task)
                 logger.debug(f"{task.prefix} fault with error, attempts left {task.attempts} (Error: {ex})")
+            finally:
+                self.cur_pool_size -= 1
         logger.debug("All tasks completed")
 
     def get_task(self) -> Task | bool:
         self.sort()
-        # if self.tasks[0].status != Status.IN_QUEUE:
-        #     return False
+        if self.tasks[0].status != Status.IN_QUEUE:
+            return False
         task = self.tasks.pop(0)
         task.status = Status.IN_PROGRESS
         return task
