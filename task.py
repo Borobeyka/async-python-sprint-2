@@ -1,7 +1,6 @@
 from __future__ import annotations
 from typing import List, Dict, Callable, Optional, Generator
 from datetime import datetime
-from functools import wraps
 from enum import Enum
 
 from uuid import uuid4
@@ -14,15 +13,6 @@ class Status(Enum):
     IN_PROGRESS = 2
     COMPLETED = 3
     ERROR = 4
-
-
-def coroutine(func: Callable) -> Callable:
-    @wraps(func)
-    def wrap(*args, **kwargs) -> Generator:
-        gen = func(*args, **kwargs)
-        next(gen)
-        return gen
-    return wrap
 
 
 class Task:
@@ -52,7 +42,6 @@ class Task:
         self.prefix = f"Task \"{self.name}\" [ID: {self.ident}]"
         self.generator = generator
 
-    @coroutine
     def run(self):
         for dependence in self.dependencies:
             yield from dependence.run()
